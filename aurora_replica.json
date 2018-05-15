@@ -1,0 +1,372 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Creates an aurora cluster with one primary / one reader ",
+    "Parameters": {
+      "EngineerName" : {
+        "Description"   : "Engineer Name",
+        "Type"          : "String"
+      },
+      "ProjectName" : {
+        "Description"   : "Project Name",
+        "Type"          : "String",
+        "Default"       : "AuroraTest"
+      },
+      "ENV" : {
+        "Description"   : "Environment ( testing or production)",
+        "Type"          : "String",
+        "AllowedValues" : [
+          "testing",
+          "production"
+          ],
+        "Default"       : "testing"
+      },
+      "DatabaseInstanceType": {
+        "Default": "db.r4.large",
+        "AllowedValues": [
+          "db.r4.large",
+          "db.r4.xlarge",
+          "db.r4.2xlarge",
+          "db.r4.4xlarge",
+          "db.r4.8xlarge",
+          "db.t2.small",
+          "db.t2.medium"
+        ],
+        "Description": "The instance type to use for the database.",
+        "Type": "String"
+      },
+      "DatabasePassword": {
+        "AllowedPattern": "[a-zA-Z0-9]+",
+        "ConstraintDescription": "must contain only alphanumeric characters.",
+        "Description": "The database admin account password.",
+        "MaxLength": "41",
+        "MinLength": "8",
+        "NoEcho": "true",
+        "Type": "String"
+      },
+      "MasterUsername": {
+        "AllowedPattern": "[a-zA-Z0-9]+",
+        "ConstraintDescription": "must contain only alphanumeric characters.",
+        "Description": "The database admin account user name.",
+        "MaxLength": "16",
+        "MinLength": "1",
+        "Type": "String",
+        "Default": "dbmaster"
+      },
+      "DatabaseBackupRetentionPeriod": {
+        "Type": "Number",
+        "Default": 1,
+        "MinValue": 1,
+        "MaxValue": 35,
+        "Description": "The database backup retention period in days."
+      },
+      "VpcId" : {
+          "Type" : "AWS::EC2::VPC::Id",
+          "Description" : "VPC ID for the security group resource",
+          "ConstraintDescription" : "Must be the vpc id of an exisiting Virtual Private Cloud"
+      },
+      "SubnetGroup" : {
+       "Type": "List<AWS::EC2::Subnet::Id>",
+        "Default" : "",
+        "Description" : "Please select a RDS Subnet Group. If one is not selected, a new one will be made" 
+      },
+      "PublicAccess" : {
+          "Type" : "String",
+          "Default" : "false",
+          "Description" : "Turn on the public or private access for the environment",
+          "AllowedValues" : ["true", "false"]
+      },
+      "DatabaseName": {
+        "AllowedPattern": "[a-zA-Z0-9]+",
+        "ConstraintDescription": "1 to 16 chars. Must contain only alphanumeric characters.",
+        "Description": "The database name.",
+        "MaxLength": "16",
+        "MinLength": "1",
+        "Type": "String",
+        "Default": "myrds"
+      },
+      "SnapshotIdentifier" : {
+        "Description" : "Snapshot Id",
+        "Type" : "String"
+      },
+      "MonitoringInterval": {
+        "Description" : "Monitoring Interval in seconds (0 to disable)",
+        "Type" : "Number",
+        "AllowedValues" : [
+          0,
+          1,
+          5,
+          10,
+          15,
+          30,
+          60
+        ],
+        "Default" : 60
+      }
+    },
+    "Metadata": {
+      "AWS::CloudFormation::Interface": {
+        "ParameterGroups": [
+          {
+            "Label" : { "default" : "Environmental Parameters" },
+            "Parameters" : [
+              "ProjectName",
+              "ENV"
+              ]
+          },
+          {
+            "Label": { "default": "Database Configuration" },
+            "Parameters": [
+              "DatabaseInstanceType",
+              "SnapshotIdentifier",
+              "DatabaseName",
+              "MasterUsername",
+              "DatabasePassword",
+              "DatabaseBackupRetentionPeriod",
+              "MonitoringInterval",
+              "VpcId",
+              "SubnetGroup",
+              "PublicAccess"
+              ]
+          }
+        ]
+      }
+    },
+    
+    "Conditions": {
+      "MasterUsername": {
+        "Fn::Not": [ { "Fn::Equals": [ "", { "Ref": "MasterUsername" } ] } ]
+      },
+      "SnapshotIdentifier": {
+        "Fn::Not": [ { "Fn::Equals": [ "", { "Ref": "SnapshotIdentifier" } ] } ]
+      },
+      "MonitoringInterval": {
+        "Fn::Not" : [ { "Fn::Equals": [ "0", { "Ref" : "MonitoringInterval" } ] } ]
+      }
+    },
+    
+    "Resources": {
+      "DatabaseSecurityGroup" :{
+          "Type" : "AWS::EC2::SecurityGroup" ,
+          "Properties" : {
+              "GroupDescription" : "Enable Mysql Access",
+              "SecurityGroupIngress" : [{
+                  "IpProtocol" : "tcp",
+                  "FromPort" : "3306",
+                  "ToPort" : "3306",
+                  "CidrIp" : "0.0.0.0/0"
+              }],
+              "VpcId" : {"Ref" : "VpcId"}
+          }
+
+      },
+      "DatabaseSubnetGroup" : {
+          "Type": "AWS::RDS::DBSubnetGroup",
+          "Properties" : {
+              "DBSubnetGroupDescription" : "Description Here",
+              "SubnetIds" : {"Ref" : "SubnetGroup"},
+              "Tags" : [
+                { "Key" : "Project" ,    "Value" : { "Ref" : "ProjectName" } },
+                { "Key" : "Environment", "Value" : { "Ref" : "ENV" } }
+              ]
+          }
+      },
+      "IAMRole" : {
+        "Type" : "AWS::IAM::Role",
+        "Properties" : {
+          "AssumeRolePolicyDocument" : {
+            "Version" : "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "",
+                "Effect": "Allow",
+                "Principal": {
+                  "Service": "monitoring.rds.amazonaws.com"
+                },
+                "Action": "sts:AssumeRole"
+              }
+            ]
+          },
+          "ManagedPolicyArns": [
+            "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole",
+            "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
+            ],
+          "Path" : "/"
+        }
+      },
+      "DBClusterParameterGroup" : {
+        "Type": "AWS::RDS::DBClusterParameterGroup",
+        "Properties" : {
+          "Description" : "Aurora Cluster Parameter Group",
+          "Family" : "aurora5.6",
+          "Parameters" : {
+              "time_zone" : "UTC"
+          }
+        }
+      },
+      "DBParameterGroup": {
+        "Type": "AWS::RDS::DBParameterGroup",
+        "Properties" : {
+          "Description" : "Aurora Parameter Group",
+          "Family" : "aurora5.6",
+          "Parameters" : {
+               "general_log" : "0"
+          }
+        }
+      },
+      "DBOptionGroup": {
+        "Type" : "AWS::RDS::OptionGroup",
+        "Properties" : {
+          "EngineName" : "aurora",
+          "MajorEngineVersion" : "5.6",
+          "OptionGroupDescription" : "Aurora Option Group",
+          "Tags" : [
+            { "Key" : "Project" ,    "Value" : { "Ref" : "ProjectName" } },
+            { "Key" : "Environment", "Value" : { "Ref" : "ENV" } }
+          ]
+        }
+      },
+      "DatabaseCluster": {
+        "Type": "AWS::RDS::DBCluster",
+        "Properties": {
+          "BackupRetentionPeriod": { "Ref": "DatabaseBackupRetentionPeriod" },
+          "DBClusterParameterGroupName": { "Ref" : "DBClusterParameterGroup" },
+          "DatabaseName": { "Ref": "DatabaseName" },
+          "DBSubnetGroupName": { "Ref": "DatabaseSubnetGroup" },
+          "Engine": "aurora",
+          "MasterUsername": {
+            "Fn::If": [
+              "MasterUsername",
+              { "Ref": "MasterUsername" },
+              { "Ref": "AWS::NoValue" }
+            ]
+          },
+          "MasterUserPassword": { "Ref": "DatabasePassword" },
+          "Port": 3306,
+          "PreferredBackupWindow": "02:00-03:00",
+          "PreferredMaintenanceWindow": "mon:03:00-mon:04:00",
+          "SnapshotIdentifier" : {
+            "Fn::If": [
+              "SnapshotIdentifier",
+              { "Ref": "SnapshotIdentifier" },
+              { "Ref": "AWS::NoValue" }
+            ]
+          },
+          "VpcSecurityGroupIds": [{ "Ref": "DatabaseSecurityGroup" } ],
+          "Tags" : [
+            { "Key" : "Project" ,    "Value" : { "Ref" : "ProjectName" } },
+            { "Key" : "Environment", "Value" : { "Ref" : "ENV" } }
+          ]
+        }
+      },
+      "DatabasePrimaryInstance": {
+        "Type": "AWS::RDS::DBInstance",
+        "Properties": {
+          "AllowMajorVersionUpgrade" : false,
+          "AutoMinorVersionUpgrade" : true,
+          "CopyTagsToSnapshot" : true,
+          "DBClusterIdentifier": { "Ref": "DatabaseCluster" },
+          "DBInstanceClass": { "Ref": "DatabaseInstanceType" },
+          "DBParameterGroupName": { "Ref": "DBParameterGroup" },
+          "DBSubnetGroupName": { "Ref": "DatabaseSubnetGroup" },
+          "Engine": "aurora",
+          "MonitoringInterval" : {
+            "Fn::If": [
+              "MonitoringInterval",
+              { "Ref": "MonitoringInterval" },
+              0
+            ]
+          },
+          "MonitoringRoleArn" : {
+            "Fn::If": [
+              "MonitoringInterval",
+              { "Fn::GetAtt" : ["IAMRole", "Arn"] },
+              { "Ref": "AWS::NoValue" }
+            ]
+          },
+          "OptionGroupName": { "Ref" : "DBOptionGroup" },
+          "PubliclyAccessible" : {"Ref": "PublicAccess"},
+          "Tags" : [
+            { "Key" : "Project" ,    "Value" : { "Ref" : "ProjectName" } },
+            { "Key" : "Environment", "Value" : { "Ref" : "ENV" } }
+          ]
+        }
+      },
+      "DatabaseReplicaInstance": {
+        "Type": "AWS::RDS::DBInstance",
+        "Properties": {
+          "AllowMajorVersionUpgrade" : false,
+          "AutoMinorVersionUpgrade" : true,
+          "CopyTagsToSnapshot" : true,
+          "DBClusterIdentifier": { "Ref": "DatabaseCluster" },
+          "DBInstanceClass": { "Ref": "DatabaseInstanceType" },
+          "DBParameterGroupName": { "Ref": "DBParameterGroup" },
+          "DBSubnetGroupName": { "Ref": "DatabaseSubnetGroup" },
+          "Engine": "aurora",
+          "MonitoringInterval" : {
+            "Fn::If": [
+              "MonitoringInterval",
+              { "Ref": "MonitoringInterval" },
+              0
+            ]
+          },
+          "MonitoringRoleArn" : {
+            "Fn::If": [
+              "MonitoringInterval",
+              { "Fn::GetAtt" : ["IAMRole", "Arn"] },
+              { "Ref": "AWS::NoValue" }
+            ]
+          },
+          "OptionGroupName": { "Ref" : "DBOptionGroup" },
+          "PubliclyAccessible" : {"Ref" : "PublicAccess"},
+          "Tags" : [
+            { "Key" : "Project" ,    "Value" : { "Ref" : "ProjectName" } },
+            { "Key" : "Environment", "Value" : { "Ref" : "ENV" } }
+          ]
+        }
+      }
+    },
+    "Outputs" : {
+      "ClusterEndPoint" : {
+        "Description" : "Aurora Cluster Read/Write End Point",
+        "Value" : { "Fn::GetAtt": [ "DatabaseCluster", "Endpoint.Address" ] },
+        "Export" : {
+          "Name" : { "Fn::Join" : [ "-", [ { "Ref" : "AWS::StackName" }, "endpoint" ] ] }
+        }
+      },
+      "ClusterPort" : {
+        "Description" : "Aurora Cluster Read/Write End Point",
+        "Value" : { "Fn::GetAtt": [ "DatabaseCluster", "Endpoint.Port" ] },
+        "Export" : {
+          "Name" : { "Fn::Join" : [ "-", [ { "Ref" : "AWS::StackName" }, "clusterport" ] ] }
+        }
+      },
+      "ClusterReadEndPoint" : {
+        "Description" : "Aurora Cluster Read/Write End Point",
+        "Value" : { "Fn::GetAtt": [ "DatabaseCluster", "ReadEndpoint.Address" ] },
+        "Export" : {
+          "Name" : { "Fn::Join" : [ "-", [ { "Ref" : "AWS::StackName" }, "readendpoint" ] ] }
+        }
+      },
+      "DBClusterName" : {
+        "Description" : "Aurora DB Cluster Name",
+        "Value" : { "Ref" : "DatabaseCluster" },
+        "Export" : {
+          "Name" : { "Fn::Join" : [ "-", [ { "Ref" : "AWS::StackName" }, "clustername" ] ] }
+        }
+      },
+      "DBSecurityGroup" : {
+          "Description" : " Auora Cluster Database Security Group" ,
+          "Value" : {"Ref": "DatabaseSecurityGroup"},
+          "Export" : {
+              "Name" : {"Fn::Join":["-",[{"Ref":"AWS::StackName"},"aurorasg"]]}
+          }
+      },
+      "IAMRoleArn" : {
+        "Description" : "Aurora DB Cluster IAM Role",
+        "Value" : { "Fn::GetAtt": [ "IAMRole", "Arn" ] },
+        "Export" : {
+          "Name" : { "Fn::Join" : [ "-", [ { "Ref" : "AWS::StackName" }, "iamrolearn" ] ] }
+        }
+      }
+    }
+}
